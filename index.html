@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>欧洲商用车数据 · 季度趋势可视化</title>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js"></script>
+<style>
+  :root{
+    --bg:#f4f7fb; --card:#ffffff; --ink:#1f2d3d; --muted:#5a6b80;
+    --line:#e6ecf3; --accent:#154789;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    font-family:"Microsoft YaHei","PingFang SC","Segoe UI",system-ui,sans-serif;
+    background:var(--bg); color:var(--ink);
+    -webkit-font-smoothing:antialiased;
+  }
+  header.app{
+    padding:26px 28px 18px;
+    border-bottom:1px solid var(--line);
+    background:linear-gradient(180deg,#fff,#fbfdff);
+  }
+  header.app h1{ margin:0; font-size:22px; letter-spacing:.5px; }
+  header.app p{ margin:8px 0 0; color:var(--muted); font-size:13px; line-height:1.6; }
+
+  main{ padding:22px 28px 40px; }
+  /* 横向滚动容器：并排三张图，总宽超出屏宽时出现下方拖拽条 */
+  .scroller{ overflow-x:auto; }
+  .row{
+    display:flex; flex-direction:row; gap:22px; align-items:stretch;
+    width:max-content; min-width:100%;
+  }
+  .card{
+    flex:0 0 720px;            /* 每张图固定加宽到 720px，不缩不伸 */
+    background:var(--card); border:1px solid var(--line);
+    border-radius:12px; padding:16px 18px 10px;
+    box-shadow:0 1px 3px rgba(20,40,80,.05);
+    display:flex; flex-direction:column;
+  }
+  .card h2{ margin:2px 2px 2px; font-size:16px; }
+  .card .sub{ margin:0 2px 8px; color:var(--muted); font-size:12px; }
+  .chart{ width:100%; height:520px; }
+
+  footer.notes{
+    margin-top:24px; padding:14px 18px; background:#fff;
+    border:1px dashed var(--line); border-radius:10px;
+    color:var(--muted); font-size:12.5px; line-height:1.7;
+  }
+  footer.notes b{ color:var(--ink); }
+</style>
+</head>
+<body>
+
+<header class="app">
+  <h1>欧洲商用车数据 · 季度趋势</h1>
+  <p>数据来源：ACEA、璞泰来整理</p>
+</header>
+
+<main>
+  <div class="scroller">
+    <div class="row">
+      <section class="card">
+        <h2>欧洲商用 EV 销量</h2>
+        <p class="sub">单位：万辆</p>
+        <div id="chart-ev" class="chart"></div>
+      </section>
+
+      <section class="card">
+        <h2>欧洲商用车销量</h2>
+        <p class="sub">单位：万辆</p>
+        <div id="chart-cv" class="chart"></div>
+      </section>
+
+      <section class="card">
+        <h2>欧洲商用车电动化率</h2>
+        <p class="sub">单位：%</p>
+        <div id="chart-rate" class="chart"></div>
+      </section>
+    </div>
+  </div>
+</main>
+
+<script>
+const QUARTERS = ['Q1','Q2','Q3','Q4'];
+const YEAR_COLORS = {
+  '2022':'#9cc0e6','2023':'#5b8fce','2024':'#2a64a8','2025':'#144073','2026':'#07254a'
+};
+
+// 数值格式化
+function fmtCount(v){
+  if(v==null) return '—';
+  // 以「万辆」展示，内部仍按「辆」精确存储，避免求和累积舍入误差；精确到个位
+  return (Number(v)/10000).toFixed(0) + ' 万辆';
+}
+function fmtPct(v){
+  if(v==null) return '—';
+  // 百分比保留 1 位小数（避免个位舍入丢精度）
+  return (Number(v)*100).toFixed(1) + ' %';
+}
+
+// 计算「整数刻度的纵轴范围」，下限取数据最小值附近的整数下界（不从 0 起），
+// 让折线占满绘图区、不拥挤。ticks 为大致刻度数。
+function niceBounds(values, ticks){
+  ticks = ticks || 5;
+  let lo = Math.min.apply(null, values);
+  let hi = Math.max.apply(null, values);
+  if(lo === hi){ lo = lo - 1; hi = hi + 1; }
+  const range = hi - lo;
+  // 留一点边距，避免折线贴边
+  const pad = range * 0.08;
+  lo = lo - pad; hi = hi + pad;
+  // 步长取「好看的整数」（1/2/5 × 10^n）
+  const rawStep = (hi - lo) / ticks;
+  const mag = Math.pow(10, Math.floor(Math.log10(rawStep)));
+  const norm = rawStep / mag;
+  let step;
+  if(norm < 1.5) step = 1*mag;
+  else if(norm < 3) step = 2*mag;
+  else if(norm < 7) step = 5*mag;
+  else step = 10*mag;
+  const min = Math.floor(lo / step) * step;
+  const max = Math.ceil(hi / step) * step;
+  return { min:min, max:max, interval:step };
+}
+
+// 三个图表的数据（来自 Excel，null 表示该季度暂无数据）
+const CONFIGS = {
+  ev: {
+    kind:'count', summaryType:'sum',
+    byYear:{
+      '2022':[20151, 21009, 24119, 41076],
+      '2023':[33543, 40014, 41286, 44330],
+      '2024':[35329, 37224, 30548, 54098],
+      '2025':[49050, 57561, 63717, 72429],
+      '2026':[66748, null, null, null]
+    },
+    // 年度合计 = Q1+Q2+Q3+Q4
+    summary:{ '2022':106355,'2023':159173,'2024':157199,'2025':242757 }
+  },
+  cv: {
+    kind:'count', summaryType:'sum', customEndLabel:true,   // 2026Q1 孤立点与折线重叠，用自定义标签避让
+    byYear:{
+      '2022':[510971, 510416, 461579, 523893],
+      '2023':[570424, 590596, 568529, 598112],
+      '2024':[625332, 665814, 399185, 748187],
+      '2025':[550104, 571117, 668917, 454204],
+      '2026':[565552, null, null, null]
+    },
+    summary:{ '2022':2006859,'2023':2327661,'2024':2438518,'2025':2244342 }
+  },
+  rate: {
+    kind:'percent', summaryType:'total',   // total = 使用 Excel 的全年 TOTAL
+    byYear:{
+      '2022':[0.03943668035955074, 0.04116054355662832, 0.0522532437567567, 0.07840532322439887],
+      '2023':[0.05880362677587198, 0.06775189808261485, 0.07261898689424814, 0.07411655342143278],
+      '2024':[0.05649638911810047, 0.055907505699790035, 0.07652592156518907, 0.07230545304850258],
+      '2025':[0.08916495789887004, 0.10078670395032892, 0.09525397022351054, 0.15946358904809294],
+      '2026':[0.11802274591903132, null, null, null]
+    },
+    // 全年电动化率（= 全年 EV 销量 / 全年商用车销量）
+    summary:{ '2022':0.052995751071699605,'2023':0.06838323965560276,
+              '2024':0.06446497421794713,'2025':0.10816399639627115 }
+  }
+};
+
+// 构造单张图的 ECharts option
+function buildOption(cfg){
+  const years = Object.keys(cfg.byYear).sort();
+  const isPct = cfg.kind === 'percent';
+  const valFmt = isPct ? fmtPct : fmtCount;
+
+  // 折线末端（右上）汇总标签
+  function endLabelFormatter(p){
+    const year = p.seriesName;
+    const arr  = cfg.byYear[year];
+    const valid = arr.filter(x => x != null);
+    const cnt = valid.length;                 // 该年有几个季度数据
+    const lastVal = valid[valid.length-1];
+    let sum = cfg.summary[year];
+
+    if(sum == null){
+      // 年度汇总缺失（如 2026）→ 显示最新季度值，并标注「(暂仅Q?)」与其它年份口径一致
+      const tag = cnt < 4 ? '(暂仅Q' + cnt + ')' : '';
+      if(cfg.summaryType === 'sum'){
+        return year + '\n' + fmtCount(lastVal) + (tag?'\n'+tag:'');
+      }
+      return year + '\n' + fmtPct(lastVal) + (tag?'\n'+tag:'');
+    }
+    if(cfg.summaryType === 'sum'){
+      return year + '\n' + fmtCount(sum);
+    }
+    return year + '\n' + fmtPct(sum);
+  }
+
+  // 是否用自定义 graphic 末端标签：百分比图（数值密集重叠）或显式标记的图（如商用车 2026Q1 孤立点重叠）
+  const useCustomLabel = isPct || cfg.customEndLabel === true;
+
+  const series = years.map(y => ({
+    name: y,
+    type: 'line',
+    data: cfg.byYear[y],
+    symbol: 'circle',
+    symbolSize: 9,
+    smooth: false,
+    connectNulls: false,
+    lineStyle:{ width:2.6, color: YEAR_COLORS[y] },
+    itemStyle:{ color: YEAR_COLORS[y] },
+    emphasis:{ focus:'series', scale:1.4 },
+    // 自定义标签的图关闭内置 endLabel，其余保留内置 endLabel
+    endLabel: useCustomLabel ? { show:false } : {
+      show:true,
+      valueAnimation:false,
+      distance:8,
+      color: YEAR_COLORS[y],
+      fontSize:12,
+      fontWeight:'bold',
+      formatter: endLabelFormatter
+    }
+  }));
+
+  return {
+    color: years.map(y => YEAR_COLORS[y]),
+    legend:{ top:6, data:years, itemWidth:14, itemHeight:8, textStyle:{color:'#5a6b80'} },
+    tooltip:{
+      trigger:'item',
+      backgroundColor:'rgba(255,255,255,0.97)',
+      borderColor:'#cdd9e5',
+      borderWidth:1,
+      textStyle:{ color:'#1f2d3d' },
+      padding:[8,10],
+      // 例：66,748 辆，2026Q1
+      formatter: function(p){
+        if(p.value == null) return '';
+        return valFmt(p.value) + '，' + p.seriesName + p.name;
+      }
+    },
+    grid:{ left:62, right:150, top:50, bottom:36 },
+    xAxis:{
+      type:'category', data:QUARTERS, boundaryGap:false,
+      axisTick:{ show:false },
+      axisLine:{ lineStyle:{ color:'#9fb0c3' } },
+      axisLabel:{ color:'#5a6b80' }
+    },
+    yAxis:(function(){
+      // 注意：niceBounds 必须在「与数据相同的单位（原始值）」上计算，
+      // 否则 min/max 与数据点单位不一致会导致折线画到绘图区外而看不见。
+      // 「万辆」「百分比」的换算只在「显示层（轴标签）」做。
+      const all = [];
+      years.forEach(y => cfg.byYear[y].forEach(v => { if(v!=null) all.push(v); }));
+      const b = niceBounds(all, 5);
+      return {
+        type:'value',
+        min:b.min, max:b.max, interval:b.interval,
+        axisLabel:{
+          color:'#5a6b80',
+          formatter: isPct
+            ? (v => (v*100).toFixed(1) + '%')      // 原始小数 → 百分比
+            : (v => (v/10000).toFixed(1))          // 原始「辆」 → 万辆
+        },
+        splitLine:{ lineStyle:{ color:'#eef2f7' } }
+      };
+    })(),
+    series: series
+  };
+}
+
+// 初始化三张图
+const charts = {};
+
+// 电动化率（百分比）图：末端汇总标签数值密集，内置 endLabel 会重叠。
+// 这里用自定义 graphic 元素手绘标签：把每个年份的末端点转成像素坐标，
+// 在垂直方向上做最小行高避让（保证不重叠），对偏离原位的标签画一条短引导线连接，
+// 引导线长度只够把标签分开、不会离折线太远。
+function renderCustomLabels(chart, cfg){
+  const years = Object.keys(cfg.byYear).sort();
+  // 每个年份的末端（最后一个有效季度）数据坐标
+  const ends = years.map(y => {
+    const arr = cfg.byYear[y];
+    let idx = -1, val = null;
+    for(let i=arr.length-1; i>=0; i--){ if(arr[i]!=null){ idx=i; val=arr[i]; break; } }
+    return { year:y, qIdx:idx, val:val };
+  });
+
+  // 组装每个标签的文本（按图表类型选用销量/百分比格式，不再显示「合计/全年」字样）
+  function labelText(e){
+    const cnt = e.qIdx + 1;
+    const tag = cnt < 4 ? ' (暂仅Q'+cnt+')' : '';
+    const vf = cfg.kind === 'percent' ? fmtPct : fmtCount;
+    const sum = cfg.summary[e.year];
+    if(sum != null) return e.year + ' ' + vf(sum) + tag;
+    return e.year + ' Q'+cnt+' ' + vf(e.val) + tag;
+  }
+
+  const LINE_H = 30;            // 标签垂直避让的最小行高（含两行文本）
+  const PAD_Y  = 12;            // 末端点像素坐标基础上，标签起始 y 偏移
+  const startX = QUARTERS.length - 1;   // 末端点 x 数据坐标（最后一个季度）
+  // 注意：2026 只有 Q1，其末端在 x=Q1 而非 Q4
+
+  // 先把每个末端点转成像素坐标，标签锚定在「末端点右侧偏下」
+  const items = ends.map(e => {
+    // 该年份末端季度的 x 坐标
+    const px = chart.convertToPixel({xAxisIndex:0, yAxisIndex:0}, [e.qIdx, e.val]);
+    return { year:e.year, text:labelText(e), px:px[0], py:px[1], qIdx:e.qIdx, val:e.val, color: YEAR_COLORS[e.year] };
+  });
+
+  // 按 y 升序，做垂直避让：从上到下，每个标签顶部至少比上一个底部低 LINE_H
+  items.sort((a,b) => a.py - b.py);
+  let cursor = items[0].py + PAD_Y;
+  items.forEach(it => {
+    if(it.py + PAD_Y < cursor){
+      it.labelY = cursor;             // 被迫下移 → 需要引导线
+    }else{
+      it.labelY = it.py + PAD_Y;
+    }
+    cursor = it.labelY + LINE_H;
+  });
+
+  // 生成 graphic 元素：每个标签 = 引导线（若偏离） + 文本块
+  const graphics = [];
+  items.forEach(it => {
+    const anchorX = it.px + 14;       // 文本左边缘锚点（末端点右侧）
+    const needLine = Math.abs(it.labelY - (it.py + PAD_Y)) > 2;
+    if(needLine){
+      // 引导线：从末端点 → 锚点附近，短折线
+      graphics.push({
+        type:'polyline',
+        shape:{ points:[ [it.px, it.py], [it.px+8, it.labelY-4], [anchorX-2, it.labelY-4] ] },
+        style:{ stroke: it.color, lineWidth:1, fill:'none', opacity:0.7 }
+      });
+    }
+    graphics.push({
+      type:'text',
+      left: anchorX, top: it.labelY,
+      style:{ text: it.text, fill: it.color, font:'bold 12px "Microsoft YaHei",sans-serif' },
+      z: 100
+    });
+  });
+
+  chart.setOption({ graphic: graphics });
+}
+
+['ev','cv','rate'].forEach(key => {
+  const el = document.getElementById('chart-' + key);
+  const c = echarts.init(el);
+  c.setOption(buildOption(CONFIGS[key]));
+  charts[key] = c;
+  // 需要自定义末端标签的图（百分比图、商用车销量图）启用 renderCustomLabels
+  if(CONFIGS[key].kind === 'percent' || CONFIGS[key].customEndLabel === true){
+    // convertToPixel 需在容器有尺寸后生效，用微延迟兜底
+    setTimeout(() => renderCustomLabels(c, CONFIGS[key]), 0);
+  }
+});
+
+// 自适应：resize 后需要重算自定义标签的像素坐标
+window.addEventListener('resize', () => {
+  Object.keys(charts).forEach(key => {
+    charts[key].resize();
+    if(CONFIGS[key].kind === 'percent' || CONFIGS[key].customEndLabel === true){
+      setTimeout(() => renderCustomLabels(charts[key], CONFIGS[key]), 0);
+    }
+  });
+});
+</script>
+</body>
+</html>
