@@ -402,29 +402,31 @@
     main{ padding:14px 12px 32px; gap:16px; }
 
     /* 所有双栏变单栏 */
-    .row{ grid-template-columns:1fr; gap:14px; }
+    .row{ grid-template-columns:1fr !important; gap:14px; }
 
     /* 卡片缩小内边距 */
     .card{ padding:14px 14px 10px; border-radius:11px; }
-    .card h2{ font-size:14.5px; }
+    .card h2{ font-size:15px; line-height:1.35; }
     .card .sub{ font-size:11px; }
+    .card .head{ flex-wrap:wrap; gap:4px; }
 
-    /* 商用车折线图：高度适配 */
-    .chart{ height:340px; }
+    /* 所有图表：强制统一高度，覆盖内联 style（!important）*/
+    .chart{ height:300px !important; }
+    .price-sub-chart{ height:240px !important; }
 
-    /* 价格小图：双列改单列，高度略降 */
-    .price-chart{ grid-template-columns:1fr; gap:12px; }
-    .price-sub-chart{ height:200px; }
+    /* 价格小图：双列强制改单列 */
+    .price-chart{ grid-template-columns:1fr !important; gap:12px; }
     .price-sub{ padding:9px 10px 4px; }
-    .price-sub-title{ font-size:12.5px; }
+    .price-sub-title{ font-size:13px; }
+    .price-desc{ font-size:12px; padding:9px 11px; line-height:1.7; }
 
     /* tab/chip 缩小 */
-    .price-type-tab, .news-sys-tab{ font-size:12.5px; padding:5px 14px; }
+    .price-type-tab, .news-sys-tab, .mat-sys-tab{ font-size:12.5px; padding:5px 14px; }
     .price-chip, .mat-chip, .price-bar .price-chip{ font-size:11.5px; padding:5px 10px; }
     .news-tab{ font-size:12px; padding:5px 11px; }
     .cat-chip{ font-size:11px; padding:4px 9px; }
 
-    /* 业绩表格：允许横向滚动（已有 wrap overflow），缩小字号 */
+    /* 业绩表格：缩小字号 */
     .perf-table{ font-size:11px; }
     .perf-table thead th, .perf-table tbody td{ padding:5px 5px; }
     .perf-desc{ font-size:12px; line-height:1.7; }
@@ -442,16 +444,18 @@
 
     /* tag 切换排：横向可滚动，避免换行过多 */
     .news-tabs, .price-type-tabs, .news-sys-tabs, .price-bar, .mat-bar, .news-cat-tabs{
-      flex-wrap:nowrap; overflow-x:auto; padding-bottom:4px;
+      flex-wrap:nowrap; overflow-x:auto; padding-bottom:4px; -webkit-overflow-scrolling:touch;
     }
-    .news-tabs .news-tab, .price-bar .price-chip, .mat-bar .mat-chip{ white-space:nowrap; flex-shrink:0; }
+    .news-tabs .news-tab, .price-bar .price-chip, .mat-bar .mat-chip,
+    .cat-chip, .price-chip, .mat-chip{ white-space:nowrap; flex-shrink:0; }
   }
 
   /* 超小屏（≤380px）进一步压缩 */
   @media (max-width:380px){
     header.app h1{ font-size:15px; }
     .card h2{ font-size:13.5px; }
-    .chart{ height:300px; }
+    .chart{ height:260px !important; }
+    .price-sub-chart{ height:220px !important; }
     .perf-table{ font-size:10px; }
   }
 </style>
